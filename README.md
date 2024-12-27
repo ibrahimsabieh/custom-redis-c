@@ -52,12 +52,19 @@ PONG
 
 ## Building from Source
 
-Building from source is simple. Just clone repo and run gcc on server.c
+Building from source requires you have libuv installed on your system.
+
+For mac, just run:
+```
+brew install libuv
+```
+
+Then, just clone repo and run gcc on server.c with uv linked (may need to change the path, i.e. if you have a different version of uv)
 
 ```
 git clone https://github.com/ibrahimsabieh/custom-redis-c.git
 cd custom-redis-c
-gcc -o server server.c
+gcc server.c -I/opt/homebrew/Cellar/libuv/1.49.2/include -L/opt/homebrew/Cellar/libuv/1.49.2/lib -luv -o server
 ```
 
 This should result in an executable file. Running it will start up the server.
