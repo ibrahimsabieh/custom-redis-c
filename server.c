@@ -1,246 +1,191 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <uv.h>
+
 #define BUF_SIZE 1024
 
-void parser(char clientRead) {
-    switch(clientRead) {
-        case '+':
-            //Simple strings
-            break;
+// 1. Forward declarations of callback functions
+static void on_new_connection(uv_stream_t *server, int status);
+static void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf);
+static void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf);
+static void on_client_closed(uv_handle_t *handle);
+static void on_write_done(uv_write_t *req, int status);
 
-        case '-':
-            // Simple Errors
-            break;
-
-        case ':':
-            // Integers :[<+|->]<value>\r\n
-            // [<+|->] is an optional plus or minus
-            break;
-
-        case '$':
-            // Bulk strings $<length>\r\n<data>\r\n
-            break;
-
-        case '*':
-            // Arrays *<number-of-elements>\r\n<element-1>...<element-n>
-            break;
-
-        case '_':
-            // Nulls
-            break;
-
-        case '#':
-            // Booleans
-            break;
-
-        case ',':
-            // Doubles
-            break;
-
-        case '(':
-            // Big numbers
-            break;
-
-        case '!':
-            // Bulk errors
-            break;
-
-        case '=':
-            // Verbatim strings
-            break;
-
-        case '%':
-            // Maps
-            break;
-
-        case '`':
-            // Attributes
-            break;
-
-        case '~':
-            //Sets
-            break;
-
-        case '>':
-            // Pushes
-            break;
-        }
-}
-
-int create_socket()
-{
-    setbuf(stdout, NULL);
-    setbuf(stderr, NULL);
-
-    int server_fd;
-    struct sockaddr_in client_addr;
-
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        printf("Socket creation failed: %s...\n", strerror(errno));
-        return 1;
-    }
-
-    // Since the tester restarts your program quite often, setting SO_REUSEADDR
-    // ensures that we don't run into 'Address already in use' errors
-    int reuse = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        printf("SO_REUSEADDR failed: %s \n", strerror(errno));
-        return 1;
-    }
-
-    struct sockaddr_in serv_addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(6379),
-        .sin_addr = {htonl(INADDR_ANY)},
-    };
-
-    if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
-        printf("Bind failed: %s \n", strerror(errno));
-        return 1;
-    }
-
-    int connection_backlog = 5;
-
-    if (listen(server_fd, connection_backlog) != 0) {
-        printf("Listen failed: %s \n", strerror(errno));
-        return 1;
-    }
-
-    printf("Socket Created! \n");
-
-    return server_fd;
-}
-
-int accpet_connect(int server_fd)
-{
-
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_len;
-
-    printf("Waiting for a client to connect...\n");
-    client_addr_len = sizeof(client_addr);
-
-    int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-
-    if (client_fd < 0) {
-        printf("Accept failed: %s \n", strerror(errno));
-        return -1;
-    }
-
-    printf("Client connected! \n");
-
-    return client_fd;
-}
-
-int handle_connection(int client_fd)
-{
-    char buffer[BUF_SIZE];
-    ssize_t bytesReadFromClient = read(client_fd, buffer, BUF_SIZE);
-    unsigned char *p = (void *)buffer;
-    // printf("%s\n", p);  // PING
-    // printf("%c\n", *p);
-    // printf("%s\n", buffer);
-
-    int len = 0;
-    p++;
-    printf("%p\n", p);
-    
-
-    if (*p != '\r')
-    {
-        len = (len * 10) + (*p - '0');
-        p++;
-        printf("%d\n", len);
-        printf("%s\n", p);
-        // printf("%c\n", *p);
-        // printf("BYE");
-    }
-    
-
-    /* Now p points at '\r', and the length is in len. */
-    // printf("%d\n", len);
-
-    if (bytesReadFromClient < 0) {
-        perror("Read Error, bytes ln 0");
-        close(client_fd);
-        return -1;
-    }
-
-    if (bytesReadFromClient == 0) {
-        printf("Client Disconnected FD: %d \n", client_fd);
-        close(client_fd);
-        return -1;
-    }
-
-    char *response = "+PONG\r\n";
-    // printf("%s\n", buffer);
-
-    if (send(client_fd, response, strlen(response), 0) < 0) {
-        perror("Send error");
-        close(client_fd);
-        return -1;
-    }
-    
-    return 0;
-}
-
-void event_loop(int server_fd)
-{
-
-    fd_set current_sockets, ready_sockets;
-
-    FD_ZERO(&current_sockets);
-    FD_SET(server_fd, &current_sockets);
-
-    while (1) {
-        
-        ready_sockets = current_sockets;
-
-        if (select(FD_SETSIZE, &ready_sockets, NULL, NULL, NULL) < 0) {
-            perror("select error");
-            exit(EXIT_FAILURE);
-        }
-
-        for (int i = 0; i < FD_SETSIZE; i++) {
-            if (FD_ISSET(i, &ready_sockets)) {
-                if (i == server_fd) {
-                    int client_fd;
-                    if ((client_fd = accpet_connect(server_fd)) < 0) {
-                        continue;
-                    }
-                    FD_SET(client_fd, &current_sockets);
-                }
-                else 
-                {
-                    if (handle_connection(i) < 0) {
-                        FD_CLR(i, &current_sockets);
-                    }
-                }
-            }
-        }
-    }
-}
-
+// 2. Main entry point (replaces select()-based event_loop)
+//
+//    - Initializes libuv
+//    - Creates/binds a TCP server
+//    - Listens for new connections
+//    - Runs the libuv loop (blocking)
 int main()
 {
-    // Disable output buffering
+    // Disable output buffering (as in your original code)
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    printf("Logs from your program will appear here!\n");
+    // Create a libuv event loop
+    uv_loop_t *loop = uv_default_loop();
 
-    // Uncomment this block to pass the first stage
-    int server_fd = create_socket();
-    event_loop(server_fd);
-    close(server_fd);
+    // Create a TCP server handle
+    uv_tcp_t server;
+    uv_tcp_init(loop, &server);
+
+    // Bind to 0.0.0.0:6379
+    struct sockaddr_in addr;
+    uv_ip4_addr("0.0.0.0", 6379, &addr);
+    uv_tcp_bind(&server, (const struct sockaddr *)&addr, 0);
+
+    // Start listening; on_new_connection is called when clients connect
+    int r = uv_listen((uv_stream_t *)&server, 128, on_new_connection);
+    if (r)
+    {
+        fprintf(stderr, "Listen error: %s\n", uv_strerror(r));
+        return 1;
+    }
+
+    printf("Server listening on port 6379...\n");
+
+    // Run the libuv loop (blocks until the server is stopped)
+    uv_run(loop, UV_RUN_DEFAULT);
+
+    // Cleanup once the loop exits
+    uv_loop_close(loop);
     return 0;
+}
+
+
+// 3. Callback: Called when a new client connects
+//
+//    - Allocate a uv_tcp_t for the client
+//    - Accept the connection
+//    - Start reading data (on_read will be called upon incoming data)
+static void on_new_connection(uv_stream_t *server, int status)
+{
+    if (status < 0)
+    {
+        fprintf(stderr, "New connection error: %s\n", uv_strerror(status));
+        return;
+    }
+
+    // Allocate a new uv_tcp_t for the incoming client
+    uv_tcp_t *client = (uv_tcp_t *)malloc(sizeof(uv_tcp_t));
+    uv_tcp_init(server->loop, client);
+
+    // Accept the connection
+    if (uv_accept(server, (uv_stream_t *)client) == 0)
+    {
+        printf("Client connected!\n");
+        // Begin reading from this client
+        uv_read_start((uv_stream_t *)client, alloc_buffer, on_read);
+    }
+    else
+    {
+        // If we failed to accept, close and free the client object
+        uv_close((uv_handle_t *)client, on_client_closed);
+    }
+}
+
+// 4. Callback: libuv calls this to allocate a buffer before reading data
+static void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
+{
+    // Allocate a buffer for reading
+    buf->base = (char *)malloc(suggested_size);
+    buf->len = suggested_size;
+}
+
+// 5. Callback: Called when data is available on the client
+//    - nread < 0 => Error or EOF
+//    - nread > 0 => We have data in buf->base
+//    - We replicate your handle_connection logic here
+static void on_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf)
+{
+    if (nread < 0)
+    {
+        // Error or EOF
+        if (nread != UV_EOF)
+        {
+            fprintf(stderr, "Read error: %s\n", uv_strerror(nread));
+        }
+        uv_close((uv_handle_t *)client, on_client_closed);
+    }
+    else if (nread > 0)
+    {
+        // We have data in buf->base, length = nread
+        // ---------------------------------------------------------------------
+        // This is the logic from your handle_connection():
+        //   1. Parse the buffer
+        //   2. Send "+PONG\r\n"
+        // ---------------------------------------------------------------------
+
+        // Simple pointer arithmetic from your code:
+        unsigned char *p = (unsigned char *)buf->base;
+        p++; // skip the first byte
+        int len = 0;
+
+        if (*p != '\r')
+        {
+            len = (len * 10) + (*p - '0');
+            p++;
+            printf("Parsed length: %d\n", len);
+            printf("Remaining data: %s\n", p);
+        }
+
+        // Build the response
+        const char *response = "+PONG\r\n";
+        size_t resp_len = strlen(response);
+
+        // We must keep the response data alive until the write completes,
+        // so we allocate it dynamically:
+        char *resp_copy = (char *)malloc(resp_len + 1);
+        memcpy(resp_copy, response, resp_len + 1);
+
+        uv_write_t *write_req = (uv_write_t *)malloc(sizeof(uv_write_t));
+        // We'll store the resp_copy pointer in write_req->data so we can free it later
+        write_req->data = resp_copy;
+
+        uv_buf_t wrbuf = uv_buf_init(resp_copy, resp_len);
+
+        // Write the data back to the client
+        int ret = uv_write(write_req, client, &wrbuf, 1, on_write_done);
+        if (ret < 0)
+        {
+            fprintf(stderr, "Write error: %s\n", uv_strerror(ret));
+            uv_close((uv_handle_t *)client, on_client_closed);
+        }
+    }
+
+    // Free the read buffer allocated in alloc_buffer()
+    if (buf->base)
+    {
+        free(buf->base);
+    }
+}
+
+// 6. Callback: Called after uv_write() finishes sending data
+//   - We free the write buffer here
+static void on_write_done(uv_write_t *req, int status)
+{
+    if (status < 0)
+    {
+        fprintf(stderr, "Write error: %s\n", uv_strerror(status));
+    }
+
+    // Free the response buffer
+    if (req->data)
+    {
+        free(req->data); // this was resp_copy
+    }
+
+    // Free the write request itself
+    free(req);
+}
+
+// 7. Callback: Called when a client handle is closed (cleanup)
+static void on_client_closed(uv_handle_t *handle)
+{
+    printf("Client disconnected or closed.\n");
+    free(handle); // free the uv_tcp_t
 }
