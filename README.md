@@ -2,7 +2,7 @@
 
 A custom Redis server built in C.
 
-Uses an Event Loop to handle multiple concurrent client and multiple commands from clients (using Select()).
+Uses an Event Loop to handle multiple concurrent client and multiple commands from clients (using Select(), working on update to switch to libuv).
 
 Binds to defult Redis port 6379
 
