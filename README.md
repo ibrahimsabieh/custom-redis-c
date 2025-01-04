@@ -16,14 +16,14 @@ Upon running the server, it will wait for incomming connections to the set port 
 
 You can use netcat (nc for mac) to send commands by first connecting to the server.
 
-'''
+```
 nc localhost 6379
 PING
-'''
+```
 output:
-'''
+```
 PONG
-'''
+```
 
 ### 2. Using Redis-cli
 
